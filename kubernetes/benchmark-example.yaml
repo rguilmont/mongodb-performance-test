@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-perf-test
+spec:
+  backoffLimit: 0  # Don't retry on failure
+  template:
+    spec:
+      containers:
+      - name: mongodb-perf-test
+        image: romainask/mongodb-performance-test  # Make sure this matches your image name
+        volumeMounts:
+        - name: mongodb-benchmark
+          mountPath: /app/run_example_benchmark.sh
+          subPath: run_example_benchmark.sh
+        args:
+        - /app/run_example_benchmark.sh
+        env:
+        - name: MONGODB_USER
+          value: username
+        - name: MONGODB_PASSWORD
+          value: password
+        - name: MONGO_URL
+          value: "mongodb://USERPASS_PLACEHOLDER@mongodb-0.mongodb-headless:27017,mongodb-1.mongodb-headless:27017,mongodb-2.mongodb-headless:27017/test?replicaSet=rs0"
+        - name: MONGO_DB
+          value: "perftest"
+        - name: MONGO_COLLECTION
+          value: "testcollection"
+      restartPolicy: Never
+      volumes:
+      - name: mongodb-benchmark
+        configMap:
+          name: mongodb-benchmark
+          defaultMode: 0755
+
+---
+
+# This is the config map that contains the benchmark script
+# Imported from run_example_benchmark.sh in the same directory.
+
+apiVersion: v1
+data:
+  run_example_benchmark.sh: |
+    #!/bin/sh
+
+    set -eu
+
+    echo "updating mongo url with user and password"
+    MONGO_URL=$(echo "$MONGO_URL" | sed "s/USERPASS_PLACEHOLDER/$MONGODB_USER:$MONGODB_PASSWORD/")
+
+    echo "running benchmark"
+    # UPDATE HERE TO RUN DIFFERENT BENCHMARKS
+    java -jar /app/mongodb-performance-test.jar -m INSERT -t 10 -d 30 --url "$MONGO_URL" -db "$MONGO_DB" -c "$MONGO_COLLECTION" -u "$MONGODB_USER" -p "$MONGODB_PASSWORD"
+    java -jar /app/mongodb-performance-test.jar -m UPDATE_ONE ITERATE_MANY -t 10 10 -d 30 --url "$MONGO_URL" -db "$MONGO_DB" -c "$MONGO_COLLECTION" -u "$MONGODB_USER" -p "$MONGODB_PASSWORD"
+
+    cd /app/
+    echo " === RESULTS === "
+    for result in $(ls *.csv); do
+        echo "=== $result ==="
+        cat $result
+    done
+kind: ConfigMap
+metadata:
+  name: mongodb-benchmark
